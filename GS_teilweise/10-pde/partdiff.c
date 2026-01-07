@@ -256,7 +256,7 @@ static void calculate(struct calculation_arguments const *arguments,
 }
 
 /* ************************************************************************ */
-/* calculate: solves the equation                                           */
+/* calculateGS: solves the equation with GS                                 */
 /* ************************************************************************ */
 static void calculateGS(struct calculation_arguments const *arguments,
                       struct calculation_results *results,
@@ -284,6 +284,9 @@ static void calculateGS(struct calculation_arguments const *arguments,
   int tag_TopRow = 0;
   int tag_BottomRow = 1;
   int tag_MaxResiduum = 2;
+  int tag_terminated = 3;
+
+  int last_interations = 0; /* stellt sicher, dass man nur noch arguments->size - arguments-> rank Iterationen durchläuft */
 
   printf("Rank %d: Starte Berechnung mit %d\n", arguments->rank, N_rows - 1);
 
@@ -356,6 +359,37 @@ static void calculateGS(struct calculation_arguments const *arguments,
     if (arguments->rank < arguments->size - 1) {
       MPI_Send(&maxResiduum, 1, MPI_DOUBLE, arguments->rank + 1, tag_MaxResiduum, arguments->comm);
     }
+    if (options->termination == TERM_PREC && terminated == 0 && maxResiduum < options->term_precision && arguments->rank == arguments->size - 1) {
+	    terminated = 1;
+    }
+
+    if (options->termination == TERM_PREC) {
+	int global_terminated;
+    	/* receive terminated from previous rank */
+    	if (arguments->rank > 0 && arguments->rank != arguments->size - 1) {
+      		MPI_Recv(&global_terminated, 1, MPI_INT, arguments->rank - 1, tag_terminated, arguments->comm, MPI_STATUS_IGNORE);
+		if (terminated == 0) {
+			terminated = global_terminated;
+		}
+    	}
+    	/* send terminated to next rank */
+    	if (arguments->rank < arguments->size - 2) {
+      		MPI_Send(&terminated, 1, MPI_INT, arguments->rank + 1, tag_terminated, arguments->comm);
+    	}
+	if (arguments->rank == 0 || arguments->rank == arguments->size - 1) {
+		/* rank 0 receives terminated from rank max */
+		if (arguments->rank == 0 && results->stat_iteration > (uint64_t) arguments->size + 1) {
+			MPI_Recv(&global_terminated, 1, MPI_INT, arguments->size - 1, tag_terminated, arguments->comm, MPI_STATUS_IGNORE);
+			if (terminated == 0) {
+				terminated = global_terminated;
+			}
+		}
+		/* rank max sends terminated to rank 0 */
+		if (arguments->rank == arguments->size - 1) {
+			MPI_Send(&terminated, 1, MPI_INT, 0, tag_terminated, arguments->comm);
+		}
+	}
+    }
 
     results->stat_iteration++;
     results->stat_precision = maxResiduum;
@@ -365,25 +399,17 @@ static void calculateGS(struct calculation_arguments const *arguments,
     m1 = m2;
     m2 = i;
 
-    /* TODO: Implement termination logic for TERM_PREC */
-    if (options->termination == TERM_PREC && terminated == 0) {
-      if (arguments->rank == arguments->size - 1) {
-        if (maxResiduum < options->term_precision) {
-          terminated = 1;
-          printf("Rank %d setzt terminated auf 1\n", arguments->rank);
-        }
-      }
-    } else if (options->termination == TERM_ITER) {
+    
+    if (options->termination == TERM_ITER) {
       term_iteration--;
-    } 
-    if (arguments->rank != arguments->size - 2) {
-      MPI_Send(&terminated, 1, MPI_INT, (arguments->rank + 1) % arguments->size, 3, arguments->comm);
     }
-    if (arguments->rank < arguments->size - 1) {
-      MPI_Recv(&terminated, 1, MPI_INT, (arguments->rank - 1 + arguments->size) % arguments->size, 3, arguments->comm, MPI_STATUS_IGNORE);
+
+    if (terminated == 1 && last_interations == 0) {
+      term_iteration = arguments->size - arguments->rank + 1; // + 1 um die Decrementierung in dieser Iteration abzufangen
+      last_interations = 1;
     }
     if (terminated == 1) {
-      term_iteration--;
+	    term_iteration--;
     }
   }
   double global_maxResiduum;
