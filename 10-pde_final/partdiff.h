@@ -55,6 +55,7 @@ struct calculation_arguments {
   int rank;         /* rank of the process                                                    */
   int size;         /* number of processes                                                    */
   MPI_Comm comm;      /* communicator for processes involved in computation                     */
+  int from;          /* first row of the current process in the global matrix                  */
 };
 
 struct calculation_results {
