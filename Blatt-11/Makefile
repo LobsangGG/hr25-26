@@ -1,5 +1,5 @@
 # Common definitions
-CC = scorep mpicc
+CC =  mpicc
 
 # Compiler flags, paths and libraries
 CFLAGS = -std=c11 -fopenmp -pedantic -Wall -Wextra -O3 -ggdb -gdwarf-4
